@@ -1,0 +1,48 @@
+/*
+ * Startup / installation file for the OAuth module.
+ *
+ * Ensures the OAuth metadata code-behind files exist under "/etc/www/.well-known/", copying them
+ * from this module's templates when missing. Runs on every startup and during installation, hence
+ * idempotent - any existing (possibly customized) file is left untouched.
+ */
+
+// Making sure the target folder exists.
+if
+   not
+      io.folder.exists:/etc/www/.well-known/
+   .lambda
+      io.folder.create:/etc/www/.well-known/
+
+// The metadata files to install; templates sit next to this file, targets live under "/etc/www/.well-known/".
+.files
+   .:oauth-authorization-server.html
+   .:oauth-authorization-server.hl
+   .:oauth-protected-resource.html
+   .:oauth-protected-resource.hl
+
+// Copying each file into place, but only when the target does not already exist.
+for-each:x:@.files/*
+
+   .name
+   set-value:x:@.name
+      get-value:x:@.dp/#
+
+   .target
+   set-value:x:@.target
+      strings.concat
+         .:/etc/www/.well-known/
+         get-value:x:@.name
+
+   if
+      not
+         io.file.exists:x:@.target
+      .lambda
+
+         .source
+         set-value:x:@.source
+            strings.concat
+               .:/modules/oauth/magic.startup/
+               get-value:x:@.name
+
+         io.file.copy:x:@.source
+            get-value:x:@.target

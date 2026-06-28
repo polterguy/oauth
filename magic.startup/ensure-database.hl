@@ -1,0 +1,9 @@
+/*
+ * Runs during startup of Magic, and ensures the OAuth module's database exists, creating it from
+ * the module's "oauth.<database-type>.sql" script (and applying any "db-migrations") if it does not.
+ *
+ * Idempotent - the database is only created when it is missing.
+ */
+signal:magic.modules.ensure-database
+   module:oauth
+   database:oauth

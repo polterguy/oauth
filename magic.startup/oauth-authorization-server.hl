@@ -1,0 +1,52 @@
+/*
+ * Code-behind serving the OAuth 2.0 Authorization Server metadata (RFC 8414) as JSON,
+ * with every URL derived from the host of the current request.
+ */
+.oninit
+
+   // This is a JSON document, not an HTML page.
+   response.headers.set
+      Content-Type:application/json
+
+.metadata
+
+   // Base URL of this cloudlet, taken from the current request.
+   .base
+   set-value:x:@.base
+      strings.concat
+         .:"https://"
+         request.host
+
+   // Building the RFC 8414 metadata document.
+   .result
+      issuer
+      authorization_endpoint
+      token_endpoint
+      registration_endpoint
+      response_types_supported
+         .:code
+      grant_types_supported
+         .:authorization_code
+         .:refresh_token
+      code_challenge_methods_supported
+         .:S256
+      scopes_supported
+         .:mcp
+   set-value:x:@.result/*/issuer
+      get-value:x:@.base
+   set-value:x:@.result/*/authorization_endpoint
+      strings.concat
+         get-value:x:@.base
+         .:/magic/modules/oauth/authorize
+   set-value:x:@.result/*/token_endpoint
+      strings.concat
+         get-value:x:@.base
+         .:/magic/modules/oauth/token
+   set-value:x:@.result/*/registration_endpoint
+      strings.concat
+         get-value:x:@.base
+         .:/magic/modules/oauth/register
+
+   // Returning the document as a JSON string.
+   lambda2json:x:@.result/*
+   return:x:-

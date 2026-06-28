@@ -1,0 +1,54 @@
+/*
+ * OAuth 2.0 Dynamic Client Registration endpoint (RFC 7591).
+ *
+ * Accepts a public client's metadata - at least [redirect_uris], optionally [client_name] - assigns
+ * a generated [client_id], stores the client, and returns the registration response. Public clients
+ * only (PKCE), so no client secret is issued. Deliberately unauthenticated, per the DCR spec.
+ */
+
+// Dynamic Client Registration accepts arbitrary client metadata (RFC 7591), so all arguments are allowed.
+.arguments:*
+
+// Requiring at least one redirect URI.
+validators.mandatory:x:@.arguments/*/redirect_uris
+
+// Generating a client identifier.
+.client-id
+set-value:x:@.client-id
+   crypto.random
+      min:32
+      max:32
+
+// Serializing the redirect URIs to a JSON array for storage.
+.redirect-uris-json
+set-value:x:@.redirect-uris-json
+   lambda2json:x:@.arguments/*/redirect_uris/*
+
+// Persisting the client.
+data.connect:oauth
+   data.create
+      table:oauth_clients
+      values
+         client_id:x:@.client-id
+         client_name:x:@.arguments/*/client_name
+         redirect_uris:x:@.redirect-uris-json
+
+// Returning the registration response (RFC 7591) with HTTP 201 Created.
+response.status.set:201
+.response
+   client_id
+   client_name
+   token_endpoint_auth_method:none
+   grant_types
+      .:authorization_code
+      .:refresh_token
+   response_types
+      .:code
+   redirect_uris
+set-value:x:@.response/*/client_id
+   get-value:x:@.client-id
+set-value:x:@.response/*/client_name
+   get-value:x:@.arguments/*/client_name
+add:x:@.response/*/redirect_uris
+   get-nodes:x:@.arguments/*/redirect_uris/*
+return-nodes:x:@.response/*

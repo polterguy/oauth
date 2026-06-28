@@ -1,0 +1,176 @@
+/*
+ * OAuth 2.0 Token endpoint (RFC 6749) with PKCE (RFC 7636).
+ *
+ * Two grants are supported:
+ *   - "authorization_code": exchanges a single-use, PKCE-verified code for a token pair.
+ *   - "refresh_token": exchanges an opaque refresh token for a new pair, rotating the refresh token.
+ *
+ * Both produce an access token (a Magic JWT carrying the user's username + roles) plus a fresh opaque
+ * refresh token stored in "oauth_refresh_tokens". The access token is what the MCP endpoint validates.
+ */
+.arguments
+   grant_type:string
+   code:string
+   code_verifier:string
+   client_id:string
+   redirect_uri:string
+   refresh_token:string
+   scope:string
+
+validators.mandatory:x:@.arguments/*/grant_type
+
+// Identity the token pair will be issued for; populated by whichever grant runs below.
+.username
+.roles
+
+if
+   eq:x:@.arguments/*/grant_type
+      .:authorization_code
+   .lambda
+
+      validators.mandatory:x:@.arguments/*/code
+      validators.mandatory:x:@.arguments/*/code_verifier
+
+      // Looking up the authorization code in the cache.
+      .cache-key
+      set-value:x:@.cache-key
+         strings.concat
+            .:"oauth_code."
+            get-value:x:@.arguments/*/code
+      cache.get:x:@.cache-key
+      if
+         null:x:@cache.get
+         .lambda
+            response.status.set:400
+            return
+               error:invalid_grant
+               error_description:Authorization code is invalid or expired
+      json2lambda:x:@cache.get
+
+      // Verifying the code was issued to this client and redirect URI.
+      if
+         or
+            neq:x:@.arguments/*/client_id
+               get-value:x:@json2lambda/*/client_id
+            neq:x:@.arguments/*/redirect_uri
+               get-value:x:@json2lambda/*/redirect_uri
+         .lambda
+            response.status.set:400
+            return
+               error:invalid_grant
+               error_description:Client or redirect URI mismatch
+
+      // Verifying PKCE - base64url(sha256(code_verifier)) must equal the stored code_challenge.
+      .computed
+      set-value:x:@.computed
+         crypto.hash.sha256:x:@.arguments/*/code_verifier
+            format:raw
+      set-value:x:@.computed
+         convert:x:@.computed
+            type:base64
+      set-value:x:@.computed
+         strings.replace:x:@.computed
+            .:+
+            .:-
+      set-value:x:@.computed
+         strings.replace:x:@.computed
+            .:/
+            .:_
+      set-value:x:@.computed
+         strings.replace:x:@.computed
+            .:"="
+            .:
+      if
+         neq:x:@.computed
+            get-value:x:@json2lambda/*/code_challenge
+         .lambda
+            response.status.set:400
+            return
+               error:invalid_grant
+               error_description:PKCE verification failed
+
+      // Code is valid - burning it so it cannot be replayed, then capturing the identity.
+      cache.set:x:@.cache-key
+      set-value:x:@.username
+         get-value:x:@json2lambda/*/username
+      add:x:@.roles
+         get-nodes:x:@json2lambda/*/roles/*
+
+else-if
+   eq:x:@.arguments/*/grant_type
+      .:refresh_token
+   .lambda
+
+      validators.mandatory:x:@.arguments/*/refresh_token
+
+      // Looking up the opaque refresh token.
+      data.connect:oauth
+         data.read
+            table:oauth_refresh_tokens
+            columns
+               username
+               roles
+            where
+               and
+                  token.eq:x:@.arguments/*/refresh_token
+         if
+            not-exists:x:@data.read/*
+            .lambda
+               response.status.set:400
+               return
+                  error:invalid_grant
+                  error_description:Refresh token is invalid
+
+         // Capturing the identity recorded for this refresh token.
+         set-value:x:@.username
+            get-value:x:@data.read/0/*/username
+         json2lambda:x:@data.read/0/*/roles
+         add:x:@.roles
+            get-nodes:x:@json2lambda/*
+
+         // Rotating - the presented refresh token is now spent.
+         data.delete
+            table:oauth_refresh_tokens
+            where
+               and
+                  token.eq:x:@.arguments/*/refresh_token
+
+else
+   .lambda
+      response.status.set:400
+      return
+         error:unsupported_grant_type
+
+// Minting the access token (a Magic JWT) carrying the captured username + roles.
+add:x:./*/auth.ticket.create/*/roles
+   get-nodes:x:@.roles/*
+auth.ticket.create
+   username:x:@.username
+   roles
+
+// Issuing a fresh opaque refresh token and storing it.
+.refresh
+set-value:x:@.refresh
+   crypto.random
+      min:48
+      max:48
+.roles-json
+set-value:x:@.roles-json
+   lambda2json:x:@.roles/*
+data.connect:oauth
+   data.create
+      table:oauth_refresh_tokens
+      values
+         token:x:@.refresh
+         username:x:@.username
+         roles:x:@.roles-json
+         client_id:x:@.arguments/*/client_id
+
+// Returning the OAuth 2.0 token response.
+unwrap:x:+/*
+return
+   access_token:x:@auth.ticket.create
+   token_type:Bearer
+   expires_in:int:1200
+   refresh_token:x:@.refresh
+   scope:mcp

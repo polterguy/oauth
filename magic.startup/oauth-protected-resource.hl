@@ -1,0 +1,34 @@
+/*
+ * Code-behind serving the OAuth 2.0 Protected Resource metadata (RFC 9728) as JSON,
+ * with the resource and authorization-server URLs derived from the current request host.
+ */
+.oninit
+
+   // This is a JSON document, not an HTML page.
+   response.headers.set
+      Content-Type:application/json
+
+.metadata
+
+   // Base URL of this cloudlet, taken from the current request.
+   .base
+   set-value:x:@.base
+      strings.concat
+         .:"https://"
+         request.host
+
+   // Building the RFC 9728 metadata document; "authorization_servers" is a one-item array.
+   .result
+      resource
+      authorization_servers
+         .
+   set-value:x:@.result/*/resource
+      strings.concat
+         get-value:x:@.base
+         .:/magic/modules/mcp/mcp
+   set-value:x:@.result/*/authorization_servers/*
+      get-value:x:@.base
+
+   // Returning the document as a JSON string.
+   lambda2json:x:@.result/*
+   return:x:-

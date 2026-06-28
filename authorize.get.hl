@@ -1,0 +1,149 @@
+/*
+ * OAuth 2.0 Authorization endpoint - consent + login page (GET).
+ *
+ * The URL the client opens in the user's browser. Validates the client and redirect URI, then returns
+ * an HTML page where the user logs in to this cloudlet and approves or denies the request. On approve
+ * the page authenticates and calls the [authorize] POST endpoint to mint the code, then redirects back
+ * to the client; on deny it redirects back with error=access_denied. All calls are same-origin (JS driven).
+ */
+.arguments
+   client_id:string
+   redirect_uri:string
+   code_challenge:string
+   code_challenge_method:string
+   state:string
+   scope:string
+   response_type:string
+   resource:string
+
+// This endpoint renders an HTML page.
+response.headers.set
+   Content-Type:text/html
+
+// Looking up the client's display name and registered redirect URIs.
+.client-name
+.stored-uris
+data.connect:oauth
+   data.read
+      table:oauth_clients
+      columns
+         client_name
+         redirect_uris
+      where
+         and
+            client_id.eq:x:@.arguments/*/client_id
+   set-value:x:@.client-name
+      get-value:x:@data.read/0/*/client_name
+   set-value:x:@.stored-uris
+      get-value:x:@data.read/0/*/redirect_uris
+
+// Rejecting unknown clients or unregistered redirect URIs with a plain error page (never redirecting).
+.invalid:bool:false
+if
+   null:x:@.stored-uris
+   .lambda
+      set-value:x:@.invalid
+         .:bool:true
+else-if
+   not
+      strings.contains:x:@.stored-uris
+         strings.concat
+            .:'"'
+            get-value:x:@.arguments/*/redirect_uri
+            .:'"'
+   .lambda
+      set-value:x:@.invalid
+         .:bool:true
+if
+   eq:x:@.invalid
+      .:bool:true
+   .lambda
+      response.status.set:400
+      .err:@"<!DOCTYPE html><html><head><meta charset='utf-8'><title>Invalid request</title></head><body style='font-family:system-ui,sans-serif;max-width:30rem;margin:4rem auto;padding:0 1rem;color:#1a1a19'><h2>Invalid authorization request</h2><p>The client or redirect URI is not recognised by this cloudlet.</p></body></html>"
+      return:x:@.err
+
+// Falling back to a generic name when the client did not register one.
+if
+   null:x:@.client-name
+   .lambda
+      set-value:x:@.client-name
+         .:An application
+
+// Building the consent + login page, then injecting the client's display name.
+.html:@"<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Authorize access</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f6f6f5;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#1a1a19}
+.card{background:#fff;border:1px solid #e6e6e3;border-radius:14px;max-width:24rem;width:92%;padding:2rem}
+h1{font-size:1.15rem;font-weight:600;margin:0 0 .35rem}
+.sub{color:#6b6b68;font-size:.92rem;margin:0 0 1.2rem}
+.app{font-weight:600}
+.note{font-size:.82rem;color:#5a5a57;background:#f6f6f5;border-radius:8px;padding:.7rem .85rem;margin-bottom:1.2rem}
+label{display:block;font-size:.78rem;color:#6b6b68;margin:.85rem 0 .3rem}
+input{width:100%;padding:.6rem .7rem;border:1px solid #dadad7;border-radius:8px;font-size:.95rem}
+input:focus{outline:none;border-color:#9a9a96}
+.row{display:flex;gap:.6rem;margin-top:1.4rem}
+button{flex:1;padding:.65rem;border-radius:8px;font-size:.92rem;font-weight:500;cursor:pointer;border:1px solid transparent}
+button:disabled{opacity:.6;cursor:default}
+.allow{background:#1a1a19;color:#fff}
+.deny{background:#fff;color:#1a1a19;border:1px solid #dadad7}
+.err{color:#c0392b;font-size:.84rem;margin-top:.9rem;min-height:1.1rem}
+</style>
+</head>
+<body>
+<div class='card'>
+<h1>Authorize access</h1>
+<p class='sub'><span class='app'>{{CLIENT}}</span> wants to access your cloudlet.</p>
+<div class='note'>It will act with <b>your roles and permissions</b> through the MCP interface. Sign in to approve.</div>
+<label>Username</label>
+<input id='u' autocomplete='username' autofocus>
+<label>Password</label>
+<input id='p' type='password' autocomplete='current-password'>
+<div class='err' id='err'></div>
+<div class='row'>
+<button class='deny' onclick='deny()'>Deny</button>
+<button class='allow' id='allow' onclick='approve()'>Allow access</button>
+</div>
+</div>
+<script>
+var P=new URLSearchParams(location.search);
+var err=document.getElementById('err');
+var btn=document.getElementById('allow');
+function fail(m){err.textContent=m;btn.disabled=false;}
+async function approve(){
+err.textContent='';btn.disabled=true;
+var u=document.getElementById('u').value.trim();
+var pw=document.getElementById('p').value;
+if(!u||!pw){fail('Enter your username and password.');return;}
+var t;
+try{
+var a=await fetch('/magic/system/auth/authenticate?username='+encodeURIComponent(u)+'&password='+encodeURIComponent(pw));
+if(!a.ok){fail('Invalid username or password.');return;}
+t=(await a.json()).ticket;
+}catch(e){fail('Could not reach the server.');return;}
+try{
+var b=new URLSearchParams();
+['client_id','redirect_uri','code_challenge','code_challenge_method','state','scope','response_type','resource'].forEach(k=>{if(P.get(k))b.set(k,P.get(k));});
+var r=await fetch('/magic/modules/oauth/authorize',{method:'POST',headers:{'Authorization':'Bearer '+t,'Content-Type':'application/x-www-form-urlencoded'},body:b});
+if(!r.ok){fail('Authorization was rejected.');return;}
+location.href=(await r.json()).redirect;
+}catch(e){fail('Could not complete authorization.');return;}
+}
+function deny(){
+var r=P.get('redirect_uri');
+if(!r){err.textContent='Request denied.';return;}
+location.href=r+(r.indexOf('?')>=0?'&':'?')+'error=access_denied&state='+encodeURIComponent(P.get('state')||'');
+}
+</script>
+</body>
+</html>"
+set-value:x:@.html
+   strings.replace:x:@.html
+      .:{{CLIENT}}
+      get-value:x:@.client-name
+return:x:@.html

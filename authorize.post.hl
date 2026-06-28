@@ -1,0 +1,106 @@
+/*
+ * OAuth 2.0 Authorization endpoint - code issuance step.
+ *
+ * Invoked with the consenting user's JWT after they approve the request on the consent page. Validates
+ * the client and that the redirect URI was registered for it, snapshots the user's username and roles,
+ * mints a single-use PKCE-bound authorization code into the cache (60 seconds), and returns the URL the
+ * browser should be redirected to in order to hand the code back to the client.
+ */
+.arguments
+   client_id:string
+   redirect_uri:string
+   code_challenge:string
+   code_challenge_method:string
+   state:string
+   scope:string
+   response_type:string
+   resource:string
+
+// The caller must be an authenticated Magic user - their identity is what the eventual token will carry.
+auth.ticket.verify
+
+// Required parameters.
+validators.mandatory:x:@.arguments/*/client_id
+validators.mandatory:x:@.arguments/*/redirect_uri
+validators.mandatory:x:@.arguments/*/code_challenge
+
+// Looking up the client and its registered redirect URIs.
+.stored-uris
+data.connect:oauth
+   data.read
+      table:oauth_clients
+      columns
+         redirect_uris
+      where
+         and
+            client_id.eq:x:@.arguments/*/client_id
+   set-value:x:@.stored-uris
+      get-value:x:@data.read/0/*/redirect_uris
+
+// Rejecting unknown clients.
+if
+   null:x:@.stored-uris
+   .lambda
+      response.status.set:400
+      return
+         error:invalid_client
+
+// Rejecting a redirect URI that was not registered for this client (quoted to avoid partial matches).
+if
+   not
+      strings.contains:x:@.stored-uris
+         strings.concat
+            .:'"'
+            get-value:x:@.arguments/*/redirect_uri
+            .:'"'
+   .lambda
+      response.status.set:400
+      return
+         error:invalid_redirect_uri
+
+// Snapshotting the consenting user's identity and roles.
+auth.ticket.get
+
+// Minting a single-use authorization code.
+.code
+set-value:x:@.code
+   crypto.random
+      min:40
+      max:40
+
+// Building the code blob, freezing the looked-up values, and copying the user's roles into it.
+.blob
+   client_id:x:@.arguments/*/client_id
+   redirect_uri:x:@.arguments/*/redirect_uri
+   code_challenge:x:@.arguments/*/code_challenge
+   username:x:@auth.ticket.get
+   roles
+unwrap:x:@.blob/*
+add:x:@.blob/*/roles
+   get-nodes:x:@auth.ticket.get/*/roles/*
+
+// Storing the blob as JSON in the cache, keyed by the code, for 60 seconds.
+.blob-json
+set-value:x:@.blob-json
+   lambda2json:x:@.blob/*
+.key
+set-value:x:@.key
+   strings.concat
+      .:"oauth_code."
+      get-value:x:@.code
+cache.set:x:@.key
+   value:x:@.blob-json
+   expiration:60
+
+// Returning the redirect URL that hands the code (and state) back to the client.
+.redirect
+set-value:x:@.redirect
+   strings.concat
+      get-value:x:@.arguments/*/redirect_uri
+      .:"?code="
+      get-value:x:@.code
+      .:"&state="
+      get-value:x:@.arguments/*/state
+unwrap:x:+/*
+return
+   redirect:x:@.redirect
