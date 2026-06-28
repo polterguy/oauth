@@ -103,6 +103,14 @@ set-value:x:@.redirect
       get-value:x:@.code
       .:"&state="
       get-value:x:@.arguments/*/state
+// TEMP DEBUG - remove after diagnosing. Logs the exact redirect URL we hand back to the client.
+.dbg
+set-value:x:@.dbg
+   strings.concat
+      .:"OAUTH-DEBUG /authorize redirect="
+      get-value:x:@.redirect
+log.info:x:@.dbg
+
 unwrap:x:+/*
 return
    redirect:x:@.redirect

@@ -11,6 +11,16 @@
 // OAuth clients send spec-defined but varied parameters (e.g. the RFC 8707 "resource"); accept any and read what we need.
 .arguments:*
 
+// TEMP DEBUG - remove after diagnosing. Logs the content-type and every parameter received.
+.dbg
+set-value:x:@.dbg
+   strings.concat
+      .:"OAUTH-DEBUG /token ctype="
+      request.headers.get:Content-Type
+      .:" args="
+      lambda2hyper:x:@.arguments/*
+log.info:x:@.dbg
+
 validators.mandatory:x:@.arguments/*/grant_type
 
 // Identity the token pair will be issued for; populated by whichever grant runs below.
