@@ -85,12 +85,21 @@ cache.set:x:@.key
    value:x:@.blob-json
    expiration:60
 
-// Returning the redirect URL that hands the code (and state) back to the client.
+// Returning the redirect URL that hands the code (and state) back to the client. We append with "&"
+// when the redirect URI already carries a query string, otherwise "?", so the code stays parseable.
+.sep:"?"
+if
+   strings.contains:x:@.arguments/*/redirect_uri
+      .:"?"
+   .lambda
+      set-value:x:@.sep
+         .:"&"
 .redirect
 set-value:x:@.redirect
    strings.concat
       get-value:x:@.arguments/*/redirect_uri
-      .:"?code="
+      get-value:x:@.sep
+      .:"code="
       get-value:x:@.code
       .:"&state="
       get-value:x:@.arguments/*/state
