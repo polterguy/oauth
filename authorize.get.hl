@@ -51,6 +51,10 @@ if
    eq:x:@.invalid
       .:bool:true
    .lambda
+      strings.concat
+         .:"OAuth consent page rejected: unknown client or redirect_uri, client "
+         get-value:x:@.arguments/*/client_id
+      log.error:x:-
       response.status.set:400
       .err:@"<!DOCTYPE html><html><head><meta charset='utf-8'><title>Invalid request</title></head><body style='font-family:system-ui,sans-serif;max-width:30rem;margin:4rem auto;padding:0 1rem;color:#1a1a19'><h2>Invalid authorization request</h2><p>The client or redirect URI is not recognised by this cloudlet.</p></body></html>"
       return:x:@.err

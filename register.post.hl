@@ -51,4 +51,14 @@ set-value:x:@.response/*/client_name
    get-value:x:@.arguments/*/client_name
 add:x:@.response/*/redirect_uris
    get-nodes:x:@.arguments/*/redirect_uris/*
+
+// Recording the registration in the audit log.
+strings.concat
+   .:"OAuth client registered: "
+   get-value:x:@.client-id
+   .:" ("
+   get-value:x:@.arguments/*/client_name
+   .:")"
+log.info:x:-
+
 return-nodes:x:@.response/*

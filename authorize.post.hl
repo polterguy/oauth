@@ -34,6 +34,10 @@ data.connect:oauth
 if
    null:x:@.stored-uris
    .lambda
+      strings.concat
+         .:"OAuth authorize rejected: unknown client "
+         get-value:x:@.arguments/*/client_id
+      log.error:x:-
       response.status.set:400
       return
          error:invalid_client
@@ -47,6 +51,12 @@ if
             get-value:x:@.arguments/*/redirect_uri
             .:'"'
    .lambda
+      strings.concat
+         .:"OAuth authorize rejected: unregistered redirect_uri "
+         get-value:x:@.arguments/*/redirect_uri
+         .:" for client "
+         get-value:x:@.arguments/*/client_id
+      log.error:x:-
       response.status.set:400
       return
          error:invalid_redirect_uri
@@ -103,6 +113,14 @@ set-value:x:@.redirect
       get-value:x:@.code
       .:"&state="
       get-value:x:@.arguments/*/state
+// Recording the issued authorization code in the audit log.
+strings.concat
+   .:"OAuth authorize: code issued for user "
+   get-value:x:@auth.ticket.get
+   .:" to client "
+   get-value:x:@.arguments/*/client_id
+log.info:x:-
+
 unwrap:x:+/*
 return
    redirect:x:@.redirect

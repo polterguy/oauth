@@ -35,6 +35,10 @@ if
       if
          null:x:@cache.get
          .lambda
+            strings.concat
+               .:"OAuth token rejected: invalid or expired code, client "
+               get-value:x:@.arguments/*/client_id
+            log.error:x:-
             response.status.set:400
             return
                error:invalid_grant
@@ -49,6 +53,10 @@ if
             neq:x:@.arguments/*/redirect_uri
                get-value:x:@json2lambda/*/redirect_uri
          .lambda
+            strings.concat
+               .:"OAuth token rejected: client or redirect_uri mismatch, client "
+               get-value:x:@.arguments/*/client_id
+            log.error:x:-
             response.status.set:400
             return
                error:invalid_grant
@@ -78,6 +86,10 @@ if
          neq:x:@.computed
             get-value:x:@json2lambda/*/code_challenge
          .lambda
+            strings.concat
+               .:"OAuth token rejected: PKCE verification failed, client "
+               get-value:x:@.arguments/*/client_id
+            log.error:x:-
             response.status.set:400
             return
                error:invalid_grant
@@ -110,6 +122,10 @@ else-if
          if
             not-exists:x:@data.read/*
             .lambda
+               strings.concat
+                  .:"OAuth token rejected: invalid refresh token, client "
+                  get-value:x:@.arguments/*/client_id
+               log.error:x:-
                response.status.set:400
                return
                   error:invalid_grant
@@ -130,6 +146,10 @@ else-if
                   token.eq:x:@.arguments/*/refresh_token
 
 else
+   strings.concat
+      .:"OAuth token rejected: unsupported grant_type "
+      get-value:x:@.arguments/*/grant_type
+   log.error:x:-
    response.status.set:400
    return
       error:unsupported_grant_type
@@ -158,6 +178,16 @@ data.connect:oauth
          username:x:@.username
          roles:x:@.roles-json
          client_id:x:@.arguments/*/client_id
+
+// Recording the issued token in the audit log.
+strings.concat
+   .:"OAuth token issued: user "
+   get-value:x:@.username
+   .:" via "
+   get-value:x:@.arguments/*/grant_type
+   .:" to client "
+   get-value:x:@.arguments/*/client_id
+log.info:x:-
 
 // Returning the OAuth 2.0 token response.
 unwrap:x:+/*
