@@ -83,7 +83,7 @@ set-value:x:@.key
       get-value:x:@.code
 cache.set:x:@.key
    value:x:@.blob-json
-   expiration:60
+   expiration:300
 
 // Returning the redirect URL that hands the code (and state) back to the client. We append with "&"
 // when the redirect URI already carries a query string, otherwise "?", so the code stays parseable.
@@ -103,14 +103,6 @@ set-value:x:@.redirect
       get-value:x:@.code
       .:"&state="
       get-value:x:@.arguments/*/state
-// TEMP DEBUG - remove after diagnosing. Logs the exact redirect URL we hand back to the client.
-.dbg
-set-value:x:@.dbg
-   strings.concat
-      .:"OAUTH-DEBUG /authorize redirect="
-      get-value:x:@.redirect
-log.info:x:@.dbg
-
 unwrap:x:+/*
 return
    redirect:x:@.redirect
