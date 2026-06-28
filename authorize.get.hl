@@ -6,15 +6,8 @@
  * the page authenticates and calls the [authorize] POST endpoint to mint the code, then redirects back
  * to the client; on deny it redirects back with error=access_denied. All calls are same-origin (JS driven).
  */
-.arguments
-   client_id:string
-   redirect_uri:string
-   code_challenge:string
-   code_challenge_method:string
-   state:string
-   scope:string
-   response_type:string
-   resource:string
+// OAuth clients send spec-defined but varied parameters; accept any and read what we need.
+.arguments:*
 
 // This endpoint renders an HTML page.
 response.headers.set

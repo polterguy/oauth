@@ -8,14 +8,8 @@
  * Both produce an access token (a Magic JWT carrying the user's username + roles) plus a fresh opaque
  * refresh token stored in "oauth_refresh_tokens". The access token is what the MCP endpoint validates.
  */
-.arguments
-   grant_type:string
-   code:string
-   code_verifier:string
-   client_id:string
-   redirect_uri:string
-   refresh_token:string
-   scope:string
+// OAuth clients send spec-defined but varied parameters (e.g. the RFC 8707 "resource"); accept any and read what we need.
+.arguments:*
 
 validators.mandatory:x:@.arguments/*/grant_type
 
@@ -136,10 +130,9 @@ else-if
                   token.eq:x:@.arguments/*/refresh_token
 
 else
-   .lambda
-      response.status.set:400
-      return
-         error:unsupported_grant_type
+   response.status.set:400
+   return
+      error:unsupported_grant_type
 
 // Minting the access token (a Magic JWT) carrying the captured username + roles.
 add:x:./*/auth.ticket.create/*/roles

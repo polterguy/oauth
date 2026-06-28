@@ -6,15 +6,8 @@
  * mints a single-use PKCE-bound authorization code into the cache (60 seconds), and returns the URL the
  * browser should be redirected to in order to hand the code back to the client.
  */
-.arguments
-   client_id:string
-   redirect_uri:string
-   code_challenge:string
-   code_challenge_method:string
-   state:string
-   scope:string
-   response_type:string
-   resource:string
+// OAuth clients send spec-defined but varied parameters; accept any and read what we need.
+.arguments:*
 
 // The caller must be an authenticated Magic user - their identity is what the eventual token will carry.
 auth.ticket.verify
