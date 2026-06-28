@@ -32,11 +32,6 @@ if
             .:"oauth_code."
             get-value:x:@.arguments/*/code
       cache.get:x:@.cache-key
-
-      // TEMP DEBUG - dumps the whole branch scope (cache key + cache.get result) to the log.
-      lambda2hyper:x:../*
-      log.info:x:-
-
       if
          null:x:@cache.get
          .lambda
