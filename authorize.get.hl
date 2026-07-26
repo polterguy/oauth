@@ -5,6 +5,15 @@
  * an HTML page where the user logs in to this cloudlet and approves or denies the request. On approve
  * the page authenticates and calls the [authorize] POST endpoint to mint the code, then redirects back
  * to the client; on deny it redirects back with error=access_denied. All calls are same-origin (JS driven).
+ *
+ * The user can sign in with a username and password, or with any OpenID provider the cloudlet has
+ * configured - somebody who only exists through Google has no password to type. Providers return here,
+ * to this same URL, which is why this is the address registered with them: the consent page is served
+ * by the backend, so it stays on the backend's own domain even when the dashboard is on another.
+ *
+ * A provider return carries no query string at all - the id_token arrives in the URL fragment, which
+ * browsers never send to the server. So an invocation without [client_id] is a return leg, and the
+ * request being consented to is restored by the page itself from session storage.
  */
 // OAuth clients send spec-defined but varied parameters; accept any and read what we need.
 .arguments:*
@@ -13,51 +22,67 @@
 response.headers.set
    Content-Type:text/html
 
+/*
+ * Telling the two arrivals apart. Only a fresh request carries the OAuth parameters, and only a fresh
+ * request can be validated here - on a return leg there is nothing in the URL to validate.
+ */
+.returning:bool:false
+if
+   null:x:@.arguments/*/client_id
+   .lambda
+      set-value:x:@.returning
+         .:bool:true
+
 // Looking up the client's display name and registered redirect URIs.
 .client-name
-.stored-uris
-data.connect:oauth
-   data.read
-      table:oauth_clients
-      columns
-         client_name
-         redirect_uris
-      where
-         and
-            client_id.eq:x:@.arguments/*/client_id
-   set-value:x:@.client-name
-      get-value:x:@data.read/0/*/client_name
-   set-value:x:@.stored-uris
-      get-value:x:@data.read/0/*/redirect_uris
+if
+   eq:x:@.returning
+      .:bool:false
+   .lambda
 
-// Rejecting unknown clients or unregistered redirect URIs with a plain error page (never redirecting).
-.invalid:bool:false
-if
-   null:x:@.stored-uris
-   .lambda
-      set-value:x:@.invalid
-         .:bool:true
-else-if
-   not
-      strings.contains:x:@.stored-uris
-         strings.concat
-            .:'"'
-            get-value:x:@.arguments/*/redirect_uri
-            .:'"'
-   .lambda
-      set-value:x:@.invalid
-         .:bool:true
-if
-   eq:x:@.invalid
-      .:bool:true
-   .lambda
-      strings.concat
-         .:"OAuth consent page rejected: unknown client or redirect_uri, client "
-         get-value:x:@.arguments/*/client_id
-      log.error:x:-
-      response.status.set:400
-      .err:@"<!DOCTYPE html><html><head><meta charset='utf-8'><title>Invalid request</title></head><body style='font-family:system-ui,sans-serif;max-width:30rem;margin:4rem auto;padding:0 1rem;color:#1a1a19'><h2>Invalid authorization request</h2><p>The client or redirect URI is not recognised by this cloudlet.</p></body></html>"
-      return:x:@.err
+      .stored-uris
+      data.connect:oauth
+         data.read
+            table:oauth_clients
+            columns
+               client_name
+               redirect_uris
+            where
+               and
+                  client_id.eq:x:@.arguments/*/client_id
+         set-value:x:@.client-name
+            get-value:x:@data.read/0/*/client_name
+         set-value:x:@.stored-uris
+            get-value:x:@data.read/0/*/redirect_uris
+
+      // Rejecting unknown clients or unregistered redirect URIs with a plain error page (never redirecting).
+      .invalid:bool:false
+      if
+         null:x:@.stored-uris
+         .lambda
+            set-value:x:@.invalid
+               .:bool:true
+      else-if
+         not
+            strings.contains:x:@.stored-uris
+               strings.concat
+                  .:'"'
+                  get-value:x:@.arguments/*/redirect_uri
+                  .:'"'
+         .lambda
+            set-value:x:@.invalid
+               .:bool:true
+      if
+         eq:x:@.invalid
+            .:bool:true
+         .lambda
+            strings.concat
+               .:"OAuth consent page rejected: unknown client or redirect_uri, client "
+               get-value:x:@.arguments/*/client_id
+            log.error:x:-
+            response.status.set:400
+            .err:@"<!DOCTYPE html><html><head><meta charset='utf-8'><title>Invalid request</title></head><body style='font-family:system-ui,sans-serif;max-width:30rem;margin:4rem auto;padding:0 1rem;color:#1a1a19'><h2>Invalid authorization request</h2><p>The client or redirect URI is not recognised by this cloudlet.</p></body></html>"
+            return:x:@.err
 
 // Falling back to a generic name when the client did not register one.
 if
@@ -90,10 +115,15 @@ button:disabled{opacity:.6;cursor:default}
 .allow{background:#1a1a19;color:#fff}
 .deny{background:#fff;color:#1a1a19;border:1px solid #dadad7}
 .err{color:#c0392b;font-size:.84rem;margin-top:.9rem;min-height:1.1rem}
+.or{display:flex;align-items:center;gap:.6rem;color:#9a9a96;font-size:.78rem;margin:1.3rem 0 0}
+.or:before,.or:after{content:'';flex:1;height:1px;background:#e6e6e3}
+.oidc{width:100%;margin-top:.6rem;background:#fff;color:#1a1a19;border:1px solid #dadad7}
+.busy{color:#6b6b68;font-size:.92rem;margin:0}
 </style>
 </head>
 <body>
 <div class='card'>
+<div id='consent'>
 <h1>Authorize access</h1>
 <p class='sub'><span class='app'>{{CLIENT}}</span> wants to access your cloudlet.</p>
 <div class='note'>It will act with <b>your roles and permissions</b> through the MCP interface. Sign in to approve.</div>
@@ -106,12 +136,41 @@ button:disabled{opacity:.6;cursor:default}
 <button class='deny' onclick='deny()'>Deny</button>
 <button class='allow' id='allow' onclick='approve()'>Allow access</button>
 </div>
+<div id='providers'></div>
+</div>
+<div id='completing' style='display:none'>
+<h1>Signing you in</h1>
+<p class='busy' id='busy'>Completing sign in with your provider ...</p>
+<div class='err' id='err2'></div>
+</div>
 </div>
 <script>
 var P=new URLSearchParams(location.search);
+var H=new URLSearchParams(location.hash.replace(/^#/,''));
+var KEY='magic-oauth-request';
+var FIELDS=['client_id','redirect_uri','code_challenge','code_challenge_method','state','scope','response_type','resource'];
 var err=document.getElementById('err');
 var btn=document.getElementById('allow');
 function fail(m){err.textContent=m;btn.disabled=false;}
+function fail2(m){document.getElementById('busy').style.display='none';document.getElementById('err2').textContent=m;}
+function request(){var r={};FIELDS.forEach(function(k){if(P.get(k))r[k]=P.get(k);});return r;}
+
+/*
+ * Consenting, once we hold a ticket for this cloudlet however it was obtained.
+ * [req] is the OAuth request - straight off the URL when signing in here, and
+ * restored from session storage when coming back from a provider.
+ */
+async function consent(t,req,onError){
+try{
+var b=new URLSearchParams();
+FIELDS.forEach(function(k){if(req[k])b.set(k,req[k]);});
+var r=await fetch('/magic/modules/oauth/authorize',{method:'POST',headers:{'Authorization':'Bearer '+t,'Content-Type':'application/x-www-form-urlencoded'},body:b});
+if(!r.ok){onError('Authorization was rejected.');return;}
+location.href=(await r.json()).redirect;
+}catch(e){onError('Could not complete authorization.');}
+}
+
+// Signing in with a username and password.
 async function approve(){
 err.textContent='';btn.disabled=true;
 var u=document.getElementById('u').value.trim();
@@ -123,19 +182,74 @@ var a=await fetch('/magic/system/auth/authenticate?username='+encodeURIComponent
 if(!a.ok){fail('Invalid username or password.');return;}
 t=(await a.json()).ticket;
 }catch(e){fail('Could not reach the server.');return;}
-try{
-var b=new URLSearchParams();
-['client_id','redirect_uri','code_challenge','code_challenge_method','state','scope','response_type','resource'].forEach(k=>{if(P.get(k))b.set(k,P.get(k));});
-var r=await fetch('/magic/modules/oauth/authorize',{method:'POST',headers:{'Authorization':'Bearer '+t,'Content-Type':'application/x-www-form-urlencoded'},body:b});
-if(!r.ok){fail('Authorization was rejected.');return;}
-location.href=(await r.json()).redirect;
-}catch(e){fail('Could not complete authorization.');return;}
+consent(t,request(),fail);
 }
+
 function deny(){
 var r=P.get('redirect_uri');
 if(!r){err.textContent='Request denied.';return;}
 location.href=r+(r.indexOf('?')>=0?'&':'?')+'error=access_denied&state='+encodeURIComponent(P.get('state')||'');
 }
+
+/*
+ * Offering whichever OpenID providers this cloudlet has configured, if any.
+ * Somebody who only exists through a provider has no password to type.
+ */
+async function loadProviders(){
+try{
+var r=await fetch('/magic/system/auth/openid-providers?createNonce=true');
+if(!r.ok){return;}
+var list=await r.json();
+if(!list||!list.length){return;}
+var host=document.getElementById('providers');
+var or=document.createElement('div');or.className='or';or.textContent='or';host.appendChild(or);
+list.forEach(function(p){
+if(!p.url||!p.client_id){return;}
+var b=document.createElement('button');
+b.className='oidc';b.type='button';b.textContent='Continue with '+p.name;
+b.onclick=function(){startOidc(p);};
+host.appendChild(b);
+});
+}catch(e){}
+}
+
+/*
+ * Handing off to a provider. The round trip loses the query string entirely, so
+ * the request being consented to is stashed first - same origin, because this
+ * page and the return leg are both served by the backend.
+ *
+ * [redirect_uri] is this page with nothing appended, since providers match it
+ * against their registered list character for character.
+ */
+function startOidc(p){
+sessionStorage.setItem(KEY,JSON.stringify(request()));
+var q=new URLSearchParams();
+q.set('client_id',p.client_id);
+q.set('response_type',p.response_type||'id_token');
+q.set('scope',p.scope||'openid email profile');
+q.set('redirect_uri',location.origin+location.pathname);
+q.set('nonce',p.nonce||'');
+location.href=p.url+'?'+q.toString();
+}
+
+// Coming back from a provider, with the id_token in the fragment.
+async function finishOidc(idToken){
+document.getElementById('consent').style.display='none';
+document.getElementById('completing').style.display='';
+history.replaceState(null,'',location.pathname);
+var raw=sessionStorage.getItem(KEY);
+if(!raw){fail2('This sign in could not be matched to a request. Start again from the application.');return;}
+sessionStorage.removeItem(KEY);
+var t;
+try{
+var r=await fetch('/magic/system/auth/openid-login?token='+encodeURIComponent(idToken));
+if(!r.ok){fail2('Your provider sign in was not accepted.');return;}
+t=(await r.json()).ticket;
+}catch(e){fail2('Could not reach the server.');return;}
+consent(t,JSON.parse(raw),fail2);
+}
+
+if(H.get('id_token')){finishOidc(H.get('id_token'));}else{loadProviders();}
 </script>
 </body>
 </html>"
