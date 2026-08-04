@@ -189,11 +189,22 @@ strings.concat
    get-value:x:@.arguments/*/client_id
 log.info:x:-
 
+// Advertising the JWT's actual configured lifetime, in seconds.
+.expires
+set-value:x:@.expires
+   config.get:"magic:auth:valid-minutes"
+      .:120
+set-value:x:@.expires
+   math.multiply
+      convert:x:@.expires
+         type:int
+      .:int:60
+
 // Returning the OAuth 2.0 token response.
 unwrap:x:+/*
 return
    access_token:x:@auth.ticket.create
    token_type:Bearer
-   expires_in:int:1200
+   expires_in:x:@.expires
    refresh_token:x:@.refresh
    scope:mcp
