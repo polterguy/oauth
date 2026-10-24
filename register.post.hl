@@ -12,6 +12,15 @@
 // Requiring at least one redirect URI.
 validators.mandatory:x:@.arguments/*/redirect_uris
 
+/*
+ * Every redirect URI must be an absolute "scheme://..." URI, and never a scheme that runs script or
+ * renders content in this origin when the consent page navigates to it. Native clients that register
+ * a custom scheme (e.g. "cursor://") stay allowed.
+ */
+for-each:x:@.arguments/*/redirect_uris/*
+   validators.regex:x:@.dp/#
+      regex:"^(?!(?i)(javascript|data|vbscript|file|blob|about):)[a-zA-Z][a-zA-Z0-9+.\\-]*://\\S+$"
+
 // Generating a client identifier.
 .client-id
 set-value:x:@.client-id

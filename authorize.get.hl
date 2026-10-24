@@ -256,5 +256,5 @@ if(H.get('id_token')){finishOidc(H.get('id_token'));}else{loadProviders();}
 set-value:x:@.html
    strings.replace:x:@.html
       .:{{CLIENT}}
-      get-value:x:@.client-name
+      strings.html-encode:x:@.client-name
 return:x:@.html
